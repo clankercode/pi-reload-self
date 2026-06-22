@@ -7,6 +7,11 @@ import {
   extractReloadPayloadToken,
   validateContinuationPrompt,
 } from "./payload.ts";
+import {
+  installToolContextReloadPatch,
+  storeContinuationPrompt,
+  takeContinuationPrompt,
+} from "./runtime-reload.ts";
 
 const COMMAND_NAME = "pi-reload-self-run";
 const TOOL_NAME = "pi_extension_dev_reload_self";
@@ -18,7 +23,16 @@ interface RuntimeReloadContext {
   };
 }
 
-export default function reloadSelfExtension(pi: ExtensionAPI): void {
+export default async function reloadSelfExtension(pi: ExtensionAPI): Promise<void> {
+  await installToolContextReloadPatch();
+
+  pi.on("session_start", async (_event, _ctx) => {
+    const continuationPrompt = takeContinuationPrompt();
+    if (continuationPrompt) {
+      pi.sendUserMessage(continuationPrompt, { deliverAs: "followUp" });
+    }
+  });
+
   pi.registerCommand(COMMAND_NAME, {
     description: "Internal command used by pi_extension_dev_reload_self to reload Pi and continue",
     handler: async (args, ctx) => {
@@ -32,8 +46,8 @@ export default function reloadSelfExtension(pi: ExtensionAPI): void {
         return;
       }
 
+      storeContinuationPrompt(continuationPrompt);
       await ctx.reload();
-      pi.sendUserMessage(continuationPrompt, { deliverAs: "followUp" });
     },
   });
 
@@ -77,15 +91,15 @@ export default function reloadSelfExtension(pi: ExtensionAPI): void {
       const runtimeCtx = ctx as RuntimeReloadContext;
 
       if (typeof runtimeCtx.reload === "function") {
+        storeContinuationPrompt(continuationPrompt);
         await runtimeCtx.reload();
-        pi.sendUserMessage(continuationPrompt, { deliverAs: "followUp" });
 
         return {
           content: [
             {
               type: "text",
               text:
-                "Pi reloaded. The provided continuation prompt has been sent as a follow-up user message.",
+                "Pi reload completed. The provided continuation prompt will be sent by the reloaded extension runtime.",
             },
           ],
           details: { queued: true, reason: "reloaded-directly" },

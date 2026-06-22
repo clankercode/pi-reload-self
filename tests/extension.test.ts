@@ -30,10 +30,11 @@ interface FakeCommandContext {
   ui?: { notify: (message: string, level: string) => void };
 }
 
-function loadExtension() {
+async function loadExtension() {
   const commands = new Map<string, RegisteredCommand>();
   const tools = new Map<string, RegisteredTool>();
   const sentUserMessages: Array<{ content: string; options?: { deliverAs?: string } }> = [];
+  const handlers = new Map<string, Array<(...args: never[]) => unknown>>();
 
   const fakePi = {
     registerCommand(name: string, command: RegisteredCommand) {
@@ -45,15 +46,20 @@ function loadExtension() {
     sendUserMessage(content: string, options?: { deliverAs?: string }) {
       sentUserMessages.push({ content, options });
     },
+    on(name: string, handler: (...args: never[]) => unknown) {
+      const existing = handlers.get(name) ?? [];
+      existing.push(handler);
+      handlers.set(name, existing);
+    },
   };
 
-  extension(fakePi as never);
+  await extension(fakePi as never);
 
-  return { commands, tools, sentUserMessages };
+  return { commands, tools, sentUserMessages, handlers };
 }
 
-test("registers pi_extension_dev_reload_self tool and internal command", () => {
-  const { commands, tools } = loadExtension();
+test("registers pi_extension_dev_reload_self tool and internal command", async () => {
+  const { commands, tools } = await loadExtension();
 
   assert.ok(commands.has("pi-reload-self-run"));
   assert.ok(tools.has("pi_extension_dev_reload_self"));
@@ -64,7 +70,7 @@ test("registers pi_extension_dev_reload_self tool and internal command", () => {
 });
 
 test("tool refuses to queue reload without explicit state loss confirmation", async () => {
-  const { tools, sentUserMessages } = loadExtension();
+  const { tools, sentUserMessages } = await loadExtension();
   const tool = tools.get("pi_extension_dev_reload_self");
   assert.ok(tool);
 
@@ -78,7 +84,7 @@ test("tool refuses to queue reload without explicit state loss confirmation", as
 });
 
 test("tool reloads directly when runtime exposes reload on tool context", async () => {
-  const { tools, sentUserMessages } = loadExtension();
+  const { tools, sentUserMessages, handlers } = await loadExtension();
   const tool = tools.get("pi_extension_dev_reload_self");
   assert.ok(tool);
 
@@ -99,14 +105,16 @@ test("tool reloads directly when runtime exposes reload on tool context", async 
   );
 
   assert.deepEqual(events, ["reload"]);
+  assert.deepEqual(sentUserMessages, []);
+  await handlers.get("session_start")?.[0]?.({} as never, {} as never);
   assert.deepEqual(sentUserMessages, [
     { content: "continue after reload", options: { deliverAs: "followUp" } },
   ]);
-  assert.match(result.content[0]?.text ?? "", /reloaded/);
+  assert.match(result.content[0]?.text ?? "", /reload completed/);
 });
 
 test("tool provides manual command when tool context cannot reload", async () => {
-  const { tools, sentUserMessages } = loadExtension();
+  const { tools, sentUserMessages } = await loadExtension();
   const tool = tools.get("pi_extension_dev_reload_self");
   assert.ok(tool);
 
@@ -135,7 +143,7 @@ test("tool provides manual command when tool context cannot reload", async () =>
 });
 
 test("internal command reports invalid payload without reloading", async () => {
-  const { commands, sentUserMessages } = loadExtension();
+  const { commands, sentUserMessages } = await loadExtension();
   const command = commands.get("pi-reload-self-run");
   assert.ok(command);
 
@@ -160,7 +168,7 @@ test("internal command reports invalid payload without reloading", async () => {
 });
 
 test("internal command handles invalid payload when ui is unavailable", async () => {
-  const { commands } = loadExtension();
+  const { commands } = await loadExtension();
   const command = commands.get("pi-reload-self-run");
   assert.ok(command);
 
@@ -174,7 +182,7 @@ test("internal command handles invalid payload when ui is unavailable", async ()
 });
 
 test("internal command reloads then sends continuation prompt", async () => {
-  const { commands, tools, sentUserMessages } = loadExtension();
+  const { commands, tools, sentUserMessages, handlers } = await loadExtension();
   const tool = tools.get("pi_extension_dev_reload_self");
   const command = commands.get("pi-reload-self-run");
   assert.ok(tool);
@@ -207,6 +215,8 @@ test("internal command reloads then sends continuation prompt", async () => {
   });
 
   assert.deepEqual(events, ["reload"]);
+  assert.deepEqual(sentUserMessages, []);
+  await handlers.get("session_start")?.[0]?.({} as never, {} as never);
   assert.deepEqual(sentUserMessages, [
     { content: "continue after reload", options: { deliverAs: "followUp" } },
   ]);
