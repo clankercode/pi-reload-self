@@ -38,7 +38,20 @@ jobs:
       - name: Upgrade npm
         run: npm install -g npm@latest
 
+      - name: Check whether version is already published
+        id: published
+        run: |
+          pkg="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$pkg@$version" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$pkg@$version is already published; skipping npm publish"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
+        if: steps.published.outputs.exists != 'true'
         run: npm publish
 
       - name: Create GitHub Release
