@@ -1,0 +1,43 @@
+{
+  "name": "pi-reload-self",
+  "version": "0.1.0",
+  "description": "Pi extension development helper that lets agents reload Pi and continue in-session.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "coding-agent",
+    "reload",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clankercode/pi-reload-self.git"
+  },
+  "bugs": {
+    "url": "https://github.com/clankercode/pi-reload-self/issues"
+  },
+  "homepage": "https://github.com/clankercode/pi-reload-self#readme",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --import tsx --test",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.9",
+    "@types/node": "^22.15.32",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "typebox": "^1.0.55"
+  }
+}
