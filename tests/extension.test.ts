@@ -16,6 +16,12 @@ interface RegisteredTool {
   execute: (
     toolCallId: string,
     params: { continuation_prompt: string; confirm_state_loss: boolean },
+    signal?: AbortSignal,
+    onUpdate?: unknown,
+    ctx?: {
+      reload?: () => Promise<void>;
+      ui?: { setEditorText?: (text: string) => void };
+    },
   ) => Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }>;
 }
 
@@ -71,20 +77,61 @@ test("tool refuses to queue reload without explicit state loss confirmation", as
   assert.match(result.content[0]?.text ?? "", /confirm_state_loss: true/);
 });
 
-test("tool queues internal command with encoded continuation payload", async () => {
+test("tool reloads directly when runtime exposes reload on tool context", async () => {
   const { tools, sentUserMessages } = loadExtension();
   const tool = tools.get("pi_extension_dev_reload_self");
   assert.ok(tool);
 
-  const result = await tool.execute("tool-1", {
-    continuation_prompt: "  continue after reload  ",
-    confirm_state_loss: true,
-  });
+  const events: string[] = [];
+  const result = await tool.execute(
+    "tool-1",
+    {
+      continuation_prompt: "  continue after reload  ",
+      confirm_state_loss: true,
+    },
+    undefined,
+    undefined,
+    {
+      reload: async () => {
+        events.push("reload");
+      },
+    },
+  );
 
-  assert.equal(sentUserMessages.length, 1);
-  assert.match(sentUserMessages[0]?.content ?? "", /^\/pi-reload-self-run [A-Za-z0-9_-]+$/);
-  assert.deepEqual(sentUserMessages[0]?.options, { deliverAs: "followUp" });
-  assert.match(result.content[0]?.text ?? "", /queued/);
+  assert.deepEqual(events, ["reload"]);
+  assert.deepEqual(sentUserMessages, [
+    { content: "continue after reload", options: { deliverAs: "followUp" } },
+  ]);
+  assert.match(result.content[0]?.text ?? "", /reloaded/);
+});
+
+test("tool provides manual command when tool context cannot reload", async () => {
+  const { tools, sentUserMessages } = loadExtension();
+  const tool = tools.get("pi_extension_dev_reload_self");
+  assert.ok(tool);
+
+  const editorTexts: string[] = [];
+  const result = await tool.execute(
+    "tool-1",
+    {
+      continuation_prompt: "  continue after reload  ",
+      confirm_state_loss: true,
+    },
+    undefined,
+    undefined,
+    {
+      ui: {
+        setEditorText: (text) => {
+          editorTexts.push(text);
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(sentUserMessages, []);
+  assert.equal(editorTexts.length, 1);
+  assert.match(editorTexts[0] ?? "", /^\/pi-reload-self-run [A-Za-z0-9_-]+$/);
+  assert.match(result.content[0]?.text ?? "", /cannot execute ctx\.reload\(\) directly/);
 });
 
 test("internal command reports invalid payload without reloading", async () => {
@@ -133,12 +180,24 @@ test("internal command reloads then sends continuation prompt", async () => {
   assert.ok(tool);
   assert.ok(command);
 
-  await tool.execute("tool-1", {
-    continuation_prompt: "continue after reload",
-    confirm_state_loss: true,
-  });
-  const payload = sentUserMessages[0]?.content.replace("/pi-reload-self-run ", "") ?? "";
-  sentUserMessages.length = 0;
+  const editorTexts: string[] = [];
+  await tool.execute(
+    "tool-1",
+    {
+      continuation_prompt: "continue after reload",
+      confirm_state_loss: true,
+    },
+    undefined,
+    undefined,
+    {
+      ui: {
+        setEditorText: (text) => {
+          editorTexts.push(text);
+        },
+      },
+    },
+  );
+  const payload = editorTexts[0]?.replace("/pi-reload-self-run ", "") ?? "";
 
   const events: string[] = [];
   await command.handler(payload, {

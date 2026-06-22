@@ -47,11 +47,14 @@ pi install /path/to/pi-reload-self
 Flow:
 
 1. The tool validates the prompt and confirmation.
-2. It queues an internal `/pi-reload-self-run ...` command as a follow-up.
-3. The command calls Pi's reload flow.
-4. After reload, the continuation prompt is sent as a follow-up user message.
+2. If the running Pi version exposes reload from tool context, it reloads directly and sends the continuation prompt.
+3. Otherwise, it fills the editor with an internal `/pi-reload-self-run ...` command for you to submit.
+4. The command calls Pi's reload flow.
+5. After reload, the continuation prompt is sent as a follow-up user message.
 
 The extension reloads in place; it does not create a new session.
+
+In Pi 0.79.x, tool contexts do not expose `ctx.reload()`, and extension-injected slash commands are delivered as chat rather than executed as commands. In that case, submit the prefilled `/pi-reload-self-run ...` command manually to complete the reload.
 
 ## Development
 

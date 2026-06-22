@@ -4,11 +4,19 @@ import { Type } from "typebox";
 import {
   decodeReloadPayload,
   encodeReloadPayload,
+  extractReloadPayloadToken,
   validateContinuationPrompt,
 } from "./payload.ts";
 
 const COMMAND_NAME = "pi-reload-self-run";
 const TOOL_NAME = "pi_extension_dev_reload_self";
+
+interface RuntimeReloadContext {
+  reload?: () => Promise<void>;
+  ui?: {
+    setEditorText?: (text: string) => void;
+  };
+}
 
 export default function reloadSelfExtension(pi: ExtensionAPI): void {
   pi.registerCommand(COMMAND_NAME, {
@@ -17,7 +25,7 @@ export default function reloadSelfExtension(pi: ExtensionAPI): void {
       let continuationPrompt: string;
 
       try {
-        continuationPrompt = decodeReloadPayload(args.trim()).continuationPrompt;
+        continuationPrompt = decodeReloadPayload(extractReloadPayloadToken(args, COMMAND_NAME)).continuationPrompt;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         ctx.ui?.notify(`pi-reload-self: ${message}`, "error");
@@ -49,7 +57,7 @@ export default function reloadSelfExtension(pi: ExtensionAPI): void {
           "Must be true. Confirms acceptance that reload can reset extension/module in-memory state and extension-maintained runtime state.",
       }),
     }),
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!params.confirm_state_loss) {
         return {
           content: [
@@ -65,17 +73,36 @@ export default function reloadSelfExtension(pi: ExtensionAPI): void {
 
       const continuationPrompt = validateContinuationPrompt(params.continuation_prompt);
       const payload = encodeReloadPayload({ continuationPrompt });
-      pi.sendUserMessage(`/${COMMAND_NAME} ${payload}`, { deliverAs: "followUp" });
+      const command = `/${COMMAND_NAME} ${payload}`;
+      const runtimeCtx = ctx as RuntimeReloadContext;
+
+      if (typeof runtimeCtx.reload === "function") {
+        await runtimeCtx.reload();
+        pi.sendUserMessage(continuationPrompt, { deliverAs: "followUp" });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                "Pi reloaded. The provided continuation prompt has been sent as a follow-up user message.",
+            },
+          ],
+          details: { queued: true, reason: "reloaded-directly" },
+        };
+      }
+
+      runtimeCtx.ui?.setEditorText?.(command);
 
       return {
         content: [
           {
             type: "text",
             text:
-              "Pi reload queued. After reload, the provided continuation prompt will be sent as a follow-up user message.",
+              `Pi tool contexts in this Pi version cannot execute ctx.reload() directly. Submit this command to reload and continue: ${command}`,
           },
         ],
-        details: { queued: true, reason: "queued" },
+        details: { queued: false, reason: "manual-command-required" },
       };
     },
   });

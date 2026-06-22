@@ -4,6 +4,7 @@ export interface ReloadPayload {
 
 const INVALID_PAYLOAD_MESSAGE = "Invalid reload payload";
 const INVALID_PROMPT_MESSAGE = "continuation_prompt must be a non-empty string";
+const BASE64URL_TOKEN_PATTERN = /^[A-Za-z0-9_-]+={0,2}$/;
 
 export function validateContinuationPrompt(value: unknown): string {
   if (typeof value !== "string") {
@@ -26,13 +27,26 @@ export function encodeReloadPayload(payload: ReloadPayload): string {
   return Buffer.from(JSON.stringify(normalized), "utf8").toString("base64url");
 }
 
+export function extractReloadPayloadToken(args: string, commandName = "pi-reload-self-run"): string {
+  const trimmed = args.trim();
+  const withoutCommand = trimmed.startsWith(`/${commandName}`)
+    ? trimmed.slice(commandName.length + 1).trim()
+    : trimmed.startsWith(commandName)
+      ? trimmed.slice(commandName.length).trim()
+      : trimmed;
+  const [token] = withoutCommand.split(/\s+/, 1);
+
+  if (!token || !BASE64URL_TOKEN_PATTERN.test(token)) {
+    throw new Error(INVALID_PAYLOAD_MESSAGE);
+  }
+
+  return token.replace(/=+$/, "");
+}
+
 export function decodeReloadPayload(encoded: string): ReloadPayload {
   try {
-    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) {
-      throw new Error("Payload is not base64url");
-    }
-
-    const decoded = Buffer.from(encoded, "base64url").toString("utf8");
+    const token = extractReloadPayloadToken(encoded);
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
     const parsed: unknown = JSON.parse(decoded);
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
