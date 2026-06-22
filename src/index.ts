@@ -18,9 +18,40 @@ const TOOL_NAME = "pi_extension_dev_reload_self";
 
 interface RuntimeReloadContext {
   reload?: () => Promise<void>;
+  isIdle?: () => boolean;
   ui?: {
+    notify?: (message: string, level: "info" | "warning" | "error") => void;
     setEditorText?: (text: string) => void;
   };
+}
+
+function scheduleReloadWhenIdle(ctx: RuntimeReloadContext, continuationPrompt: string): void {
+  const reload = ctx.reload;
+  if (typeof reload !== "function") {
+    throw new Error("Pi reload handler is unavailable");
+  }
+
+  const startedAt = Date.now();
+  const timeoutMs = 30_000;
+
+  const attempt = () => {
+    if (ctx.isIdle?.() === false) {
+      if (Date.now() - startedAt > timeoutMs) {
+        ctx.ui?.notify?.("pi-reload-self: timed out waiting for the agent to become idle", "error");
+        return;
+      }
+      setTimeout(attempt, 100);
+      return;
+    }
+
+    storeContinuationPrompt(continuationPrompt);
+    reload().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui?.notify?.(`pi-reload-self: reload failed: ${message}`, "error");
+    });
+  };
+
+  setTimeout(attempt, 0);
 }
 
 export default async function reloadSelfExtension(pi: ExtensionAPI): Promise<void> {
@@ -91,18 +122,17 @@ export default async function reloadSelfExtension(pi: ExtensionAPI): Promise<voi
       const runtimeCtx = ctx as RuntimeReloadContext;
 
       if (typeof runtimeCtx.reload === "function") {
-        storeContinuationPrompt(continuationPrompt);
-        await runtimeCtx.reload();
+        scheduleReloadWhenIdle(runtimeCtx, continuationPrompt);
 
         return {
           content: [
             {
               type: "text",
               text:
-                "Pi reload completed. The provided continuation prompt will be sent by the reloaded extension runtime.",
+                "Pi reload will run after the current response finishes. The provided continuation prompt will be sent by the reloaded extension runtime.",
             },
           ],
-          details: { queued: true, reason: "reloaded-directly" },
+          details: { queued: true, reason: "scheduled-after-idle" },
         };
       }
 

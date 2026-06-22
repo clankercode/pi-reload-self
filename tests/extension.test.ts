@@ -20,7 +20,11 @@ interface RegisteredTool {
     onUpdate?: unknown,
     ctx?: {
       reload?: () => Promise<void>;
-      ui?: { setEditorText?: (text: string) => void };
+      isIdle?: () => boolean;
+      ui?: {
+        notify?: (message: string, level: "info" | "warning" | "error") => void;
+        setEditorText?: (text: string) => void;
+      };
     },
   ) => Promise<{ content: Array<{ type: "text"; text: string }>; details: unknown }>;
 }
@@ -83,7 +87,7 @@ test("tool refuses to queue reload without explicit state loss confirmation", as
   assert.match(result.content[0]?.text ?? "", /confirm_state_loss: true/);
 });
 
-test("tool reloads directly when runtime exposes reload on tool context", async () => {
+test("tool schedules reload after runtime exposes reload on tool context", async () => {
   const { tools, sentUserMessages, handlers } = await loadExtension();
   const tool = tools.get("pi_extension_dev_reload_self");
   assert.ok(tool);
@@ -104,13 +108,50 @@ test("tool reloads directly when runtime exposes reload on tool context", async 
     },
   );
 
-  assert.deepEqual(events, ["reload"]);
+  assert.deepEqual(events, []);
   assert.deepEqual(sentUserMessages, []);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(events, ["reload"]);
   await handlers.get("session_start")?.[0]?.({} as never, {} as never);
   assert.deepEqual(sentUserMessages, [
     { content: "continue after reload", options: { deliverAs: "followUp" } },
   ]);
-  assert.match(result.content[0]?.text ?? "", /reload completed/);
+  assert.match(result.content[0]?.text ?? "", /after the current response finishes/);
+});
+
+test("tool waits for idle before scheduled reload", async () => {
+  const { tools, sentUserMessages, handlers } = await loadExtension();
+  const tool = tools.get("pi_extension_dev_reload_self");
+  assert.ok(tool);
+
+  const events: string[] = [];
+  let idle = false;
+  const result = await tool.execute(
+    "tool-1",
+    {
+      continuation_prompt: "continue after reload",
+      confirm_state_loss: true,
+    },
+    undefined,
+    undefined,
+    {
+      isIdle: () => idle,
+      reload: async () => {
+        events.push("reload");
+      },
+    },
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(events, []);
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.deepEqual(events, ["reload"]);
+  await handlers.get("session_start")?.[0]?.({} as never, {} as never);
+  assert.deepEqual(sentUserMessages, [
+    { content: "continue after reload", options: { deliverAs: "followUp" } },
+  ]);
+  assert.match(result.content[0]?.text ?? "", /after the current response finishes/);
 });
 
 test("tool provides manual command when tool context cannot reload", async () => {
