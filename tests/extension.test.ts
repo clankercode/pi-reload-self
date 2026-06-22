@@ -87,6 +87,45 @@ test("tool queues internal command with encoded continuation payload", async () 
   assert.match(result.content[0]?.text ?? "", /queued/);
 });
 
+test("internal command reports invalid payload without reloading", async () => {
+  const { commands, sentUserMessages } = loadExtension();
+  const command = commands.get("pi-reload-self-run");
+  assert.ok(command);
+
+  const events: string[] = [];
+  const notifications: Array<{ message: string; level: string }> = [];
+  await command.handler("not valid !!!", {
+    reload: async () => {
+      events.push("reload");
+    },
+    ui: {
+      notify: (message, level) => {
+        notifications.push({ message, level });
+      },
+    },
+  });
+
+  assert.deepEqual(events, []);
+  assert.deepEqual(sentUserMessages, []);
+  assert.equal(notifications.length, 1);
+  assert.match(notifications[0]?.message ?? "", /Invalid reload payload/);
+  assert.equal(notifications[0]?.level, "error");
+});
+
+test("internal command handles invalid payload when ui is unavailable", async () => {
+  const { commands } = loadExtension();
+  const command = commands.get("pi-reload-self-run");
+  assert.ok(command);
+
+  await assert.doesNotReject(async () => {
+    await command.handler("not valid !!!", {
+      reload: async () => {
+        throw new Error("reload should not run");
+      },
+    });
+  });
+});
+
 test("internal command reloads then sends continuation prompt", async () => {
   const { commands, tools, sentUserMessages } = loadExtension();
   const tool = tools.get("pi_extension_dev_reload_self");

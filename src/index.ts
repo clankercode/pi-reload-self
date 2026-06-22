@@ -20,7 +20,7 @@ export default function reloadSelfExtension(pi: ExtensionAPI): void {
         continuationPrompt = decodeReloadPayload(args.trim()).continuationPrompt;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`pi-reload-self: ${message}`, "error");
+        ctx.ui?.notify(`pi-reload-self: ${message}`, "error");
         return;
       }
 
